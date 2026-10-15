@@ -10,7 +10,7 @@
     "description": "Project Reclaimer dedicated server for Halo 3 (Halo: The Master Chief Collection), run under Wine. Halo 3's files come from your own MCC copy: upload them into game/. https://projectreclaimer.dev/host",
     "features": null,
     "docker_images": {
-        "Wine (stable)": "ghcr.io/pelican-eggs/yolks:wine_latest"
+        "Wine stable": "ghcr.io/pelican-eggs/yolks:wine_latest"
     },
     "file_denylist": [],
     "startup": "exec bash ./reclaimer-start.sh",
