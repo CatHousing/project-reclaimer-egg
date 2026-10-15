@@ -1,0 +1,262 @@
+{
+    "_comment": "DO NOT EDIT: FILE GENERATED AUTOMATICALLY BY PTERODACTYL PANEL - PTERODACTYL.IO",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-10-15T00:00:00+00:00",
+    "name": "Project Reclaimer (Halo 3)",
+    "author": "inlinechar@protonmail.com",
+    "description": "Project Reclaimer dedicated server for Halo 3 (Halo: The Master Chief Collection), run under Wine. Halo 3's files come from your own MCC copy: upload them into game/. https://projectreclaimer.dev/host",
+    "features": null,
+    "docker_images": {
+        "Wine (stable)": "ghcr.io/pelican-eggs/yolks:wine_latest"
+    },
+    "file_denylist": [],
+    "startup": "exec bash ./reclaimer-start.sh",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\": \"[egg] Starting Project Reclaimer\"}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/bash\n# Project Reclaimer (Halo 3) dedicated server: Pterodactyl install script.\n# Downloads the server-only build from the official releases, checks it\n# against the release's SHA256SUMS.txt and writes reclaimer-start.sh.\n# Reinstalling updates both and keeps dedicated.toml, game/ and the rest.\n# Halo 3's game files can't be downloaded: upload them into game/.\nset -euo pipefail\nmkdir -p /mnt/server\ncd /mnt/server\n\nRELEASES=https://github.com/ProjectReclaimer/project-reclaimer-releases/releases\nVERSION=${RECLAIMER_VERSION:-latest}\nif [ \"$VERSION\" = latest ]; then\n    BASE=$RELEASES/latest/download\nelse\n    BASE=$RELEASES/download/v${VERSION#v}\nfi\n\n# \"<sha256>  project-reclaimer-dedicated-v0.9.17.exe\" (server-only build, 0.8.14+)\nline=$(curl -fsSL --retry 3 \"$BASE/SHA256SUMS.txt\" | tr -d '\\r' |\n    grep -m1 -E '[ *]project-reclaimer-dedicated-v[^ ]+\\.exe$') || {\n    echo \"No server build listed in $BASE/SHA256SUMS.txt. Check the Project Reclaimer Version variable.\"\n    exit 1\n}\nsum=${line%% *}\nasset=${line##*[ *]}\n\necho \"Downloading $asset\"\ncurl -fsSL --retry 3 -o project-reclaimer.exe.part \"$BASE/$asset\"\necho \"$sum  project-reclaimer.exe.part\" | sha256sum -c -\nmv -f project-reclaimer.exe.part project-reclaimer.exe\nmkdir -p game\n\ncat > reclaimer-start.sh << 'START_SH'\n#!/bin/bash\n# Project Reclaimer start script, written by the egg's installer (a reinstall\n# rewrites it). The startup command execs it, so Pterodactyl's ^C (SIGINT)\n# reaches the server, which stops cleanly on Ctrl+C.\ncd /home/container || exit 1\nEXE=./project-reclaimer.exe\ntrap 'exit 0' INT TERM\n\n# An empty panel variable means \"keep dedicated.toml's value\". Unset those\n# so a pinned older release never sees a variable name it doesn't know.\nfor v in ${!RECLAIMER_DEDICATED_@}; do [ -n \"${!v}\" ] || unset \"$v\"; done\n# One panel server runs one Reclaimer server: the first [[server]] block.\nexport RECLAIMER_DEDICATED_ONLY=1\n\nif [ ! -f dedicated.toml ]; then\n    echo \"[egg] First start: creating dedicated.toml, playlists/, content/ and bans.json\"\n    wine \"$EXE\" dedicated init . || exit 1\nfi\n\n# The first [[server]]'s port follows the allocation (UDP game, TCP RCON).\nif [ -n \"$SERVER_PORT\" ]; then\n    awk -v port=\"$SERVER_PORT\" '\n        /^[ \\t]*\\[\\[[ \\t]*server[ \\t]*\\]\\]/ { n++; first = (n == 1); print; next }\n        /^[ \\t]*\\[/ { first = 0 }\n        first && /^[ \\t]*port[ \\t]*=/ { print \"port = \" port; next }\n        { print }\n    ' dedicated.toml > .dedicated.toml.egg\n    if cmp -s dedicated.toml .dedicated.toml.egg; then\n        rm -f .dedicated.toml.egg\n    else\n        mv -f .dedicated.toml.egg dedicated.toml\n        echo \"[egg] Set the first [[server]]'s port in dedicated.toml to $SERVER_PORT\"\n    fi\nfi\n\n# Wait until the game files and settings check out: upload Halo 3's files\n# into game/ (and fix dedicated.toml) while this runs, no restart needed.\nlast=\nuntil report=$(wine \"$EXE\" dedicated check 2>&1); do\n    if [ \"$report\" != \"$last\" ]; then\n        printf '%s\\n' \"$report\"\n        echo \"[egg] Waiting for 'dedicated check' to pass, checking again every 15 seconds.\"\n        last=$report\n    fi\n    sleep 15\ndone\nprintf '%s\\n' \"$report\"\n\n# Panel console: each line goes to this server's remote console (needs an\n# RCON password). xargs keeps \"quoted names\" together and runs no shell.\nexec 3<&0\nwhile IFS= read -r line; do\n    [ -n \"${line//[[:space:]]/}\" ] && printf '%s\\n' \"$line\" | xargs wine \"$EXE\" dedicated rcon\ndone <&3 &\n\necho \"[egg] Starting Project Reclaimer\"\nexec wine \"$EXE\" dedicated \"$@\" < /dev/null 3<&-\nSTART_SH\nchmod +x reclaimer-start.sh\n\necho \"Installed $asset. Upload Halo 3's files into game/, then start the server.\"\n",
+            "container": "ghcr.io/pelican-eggs/installers:debian",
+            "entrypoint": "bash"
+        }
+    },
+    "variables": [
+        {
+            "name": "Project Reclaimer Version",
+            "description": "Release to install, such as 0.9.17, or latest. Applied on install and on Settings > Reinstall Server, which keeps your files. Players must run the same version as the server.",
+            "env_variable": "RECLAIMER_VERSION",
+            "default_value": "latest",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:32|regex:/^[A-Za-z0-9.-]+$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Host Name",
+            "description": "Shown under the server's name in the Server Browser and in its lobby. Empty keeps dedicated.toml's setting (Dedicated server).",
+            "env_variable": "RECLAIMER_DEDICATED_HOST_NAME",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:128",
+            "field_type": "text"
+        },
+        {
+            "name": "Admins",
+            "description": "Player IDs (64 hex characters) who may kick and ban, separated by commas. Added to the admins in dedicated.toml. Players find theirs under Settings > Online services > Your player ID.",
+            "env_variable": "RECLAIMER_DEDICATED_ADMINS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:4096|regex:/^[0-9A-Fa-f, ]*$/",
+            "field_type": "text"
+        },
+        {
+            "name": "Join Password",
+            "description": "Password players need to join. Empty keeps dedicated.toml's setting (none).",
+            "env_variable": "RECLAIMER_DEDICATED_PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:128",
+            "field_type": "text"
+        },
+        {
+            "name": "Max Players",
+            "description": "Players admitted at once, 1-127, split-screen players included. Empty keeps dedicated.toml's setting (16). A max_players in the [[server]] block wins. Campaign co-op takes at most 16.",
+            "env_variable": "RECLAIMER_DEDICATED_MAX_PLAYERS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:1,127",
+            "field_type": "text"
+        },
+        {
+            "name": "Min Players",
+            "description": "Players the lobby waits for before a vote or game starts. Empty keeps dedicated.toml's setting (1).",
+            "env_variable": "RECLAIMER_DEDICATED_MIN_PLAYERS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:1,127",
+            "field_type": "text"
+        },
+        {
+            "name": "Welcome Message",
+            "description": "Chat line every player reads as they join; {name} and {server} are filled in. Empty keeps dedicated.toml's setting (none).",
+            "env_variable": "RECLAIMER_DEDICATED_WELCOME",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:300",
+            "field_type": "text"
+        },
+        {
+            "name": "Hidden",
+            "description": "true keeps the server out of the Server Browser: players join by address with Direct Connect. Empty keeps dedicated.toml's setting (false).",
+            "env_variable": "RECLAIMER_DEDICATED_HIDDEN",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Anti-Cheat",
+            "description": "enforce (kicks), detect (logs only) or off. Empty keeps dedicated.toml's setting (enforce).",
+            "env_variable": "RECLAIMER_DEDICATED_ANTI_CHEAT",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:enforce,detect,off",
+            "field_type": "text"
+        },
+        {
+            "name": "Block VPNs",
+            "description": "true refuses players on a VPN, proxy or hosting provider. Empty keeps dedicated.toml's setting (true).",
+            "env_variable": "RECLAIMER_DEDICATED_BLOCK_VPN",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Max Ping",
+            "description": "Highest ping in milliseconds a player may join with, up to 1000; 0 takes everyone. Empty keeps dedicated.toml's setting (0).",
+            "env_variable": "RECLAIMER_DEDICATED_MAX_PING",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:0,1000",
+            "field_type": "text"
+        },
+        {
+            "name": "Player Votes",
+            "description": "Players may vote to kick, end the round or game, and shuffle teams. Empty keeps dedicated.toml's setting (true).",
+            "env_variable": "RECLAIMER_DEDICATED_VOTES",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Text Chat",
+            "description": "Empty keeps dedicated.toml's setting (true).",
+            "env_variable": "RECLAIMER_DEDICATED_TEXT_CHAT",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Voice Chat",
+            "description": "Empty keeps dedicated.toml's setting (true).",
+            "env_variable": "RECLAIMER_DEDICATED_VOICE",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Team Changing",
+            "description": "balanced (only to a smaller team), game_type (as each game type allows) or off. Empty keeps dedicated.toml's setting (balanced).",
+            "env_variable": "RECLAIMER_DEDICATED_TEAM_CHANGING",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:balanced,game_type,off",
+            "field_type": "text"
+        },
+        {
+            "name": "Friendly Fire",
+            "description": "false stops teammates and co-op partners hurting each other. Empty keeps dedicated.toml's setting (true: the game type decides).",
+            "env_variable": "RECLAIMER_DEDICATED_FRIENDLY_FIRE",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Share Mods",
+            "description": "true lets players download this server's mods from it. Empty keeps dedicated.toml's setting (false).",
+            "env_variable": "RECLAIMER_DEDICATED_SHARE_MODS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Share Rate",
+            "description": "Upload limit for mod downloads together, in Mbit/s; 0 is no limit. Empty keeps dedicated.toml's setting (20).",
+            "env_variable": "RECLAIMER_DEDICATED_SHARE_RATE",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|integer|between:0,100000",
+            "field_type": "text"
+        },
+        {
+            "name": "RCON Password",
+            "description": "8-128 characters. Turns on the remote console, which the panel console uses to send commands (status, players, kick, ban, map...). Empty keeps dedicated.toml's [rcon] password (none: off).",
+            "env_variable": "RECLAIMER_DEDICATED_RCON_PASSWORD",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|between:8,128",
+            "field_type": "text"
+        },
+        {
+            "name": "RCON Address",
+            "description": "127.0.0.1 keeps RCON inside the container; the panel console still works. 0.0.0.0 also opens it on this allocation's TCP port for outside tools (unencrypted). Empty keeps dedicated.toml's setting (127.0.0.1).",
+            "env_variable": "RECLAIMER_DEDICATED_RCON_ADDRESS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:127.0.0.1,0.0.0.0",
+            "field_type": "text"
+        },
+        {
+            "name": "Public Address",
+            "description": "IPv4 address or DNS name players connect to. Empty detects it (api.ipify.org). Set it when the node's outgoing address isn't this allocation's.",
+            "env_variable": "RECLAIMER_DEDICATED_PUBLIC_ADDRESS",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|max:253",
+            "field_type": "text"
+        },
+        {
+            "name": "Auto Update",
+            "description": "true installs each new stable release by itself and restarts (games in progress end). Empty keeps dedicated.toml's setting (false). Otherwise update with Reinstall Server.",
+            "env_variable": "RECLAIMER_DEDICATED_AUTO_UPDATE",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Wine Packages",
+            "description": "Winetricks verbs the image installs into the Wine prefix before each start (skipped once installed): the Visual C++ 2015-2022 runtime the server needs.",
+            "env_variable": "WINETRICKS_RUN",
+            "default_value": "vcrun2022",
+            "user_viewable": false,
+            "user_editable": false,
+            "rules": "required|string|max:256",
+            "field_type": "text"
+        }
+    ]
+}
